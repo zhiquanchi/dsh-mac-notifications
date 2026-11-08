@@ -1,0 +1,24 @@
+- insert:
+    - id: mac-notifications
+      name: 'dsh-mac-notifications'
+      config:
+        # 需要你做出选择时（ask_user_question）通知
+        questions: true
+        # 请求授权（approval）时通知
+        approvals: true
+        # 任务正常完成时通知
+        completed: true
+        # 任务异常中断/失败时通知
+        errors: true
+        # 是否包含子智能体（subagent）会话的通知；默认只通知主会话
+        includeSubagents: false
+        # 任务完成通知时，若该会话仍有后台任务在运行则抑制（避免误报）
+        suppressWhenJobsRunning: true
+        # 通知是否带提示音
+        sound: true
+        # 通知文案语言：zh | en
+        language: zh
+        # 通知归属的应用名（通知中心里显示的图标来源）
+        appName: DeepSeek Harness
+        # 完成通知的最小间隔（毫秒），避免连续快速通知
+        cooldownMs: 3000

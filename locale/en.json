@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Native notifications",
+    "description": "Shows native macOS notifications when the agent asks for your choice, when a task completes, and when a task fails."
+  }
+}

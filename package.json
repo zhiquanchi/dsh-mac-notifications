@@ -1,0 +1,36 @@
+{
+  "name": "dsh-mac-notifications",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Native macOS Notification Center alerts for DeepSeek Harness: agent questions, task completion, and task failures",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "notification",
+    "notifications",
+    "macos",
+    "osascript"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}
