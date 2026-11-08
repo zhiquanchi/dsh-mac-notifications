@@ -73,7 +73,7 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
 | `sound` | boolean | `true` | 通知是否播放系统默认提示音 |
 | `language` | `'zh' \| 'en'` | `'zh'` | 通知文案语言 |
 | `cooldownMs` | number | `3000` | 完成通知的最小间隔（毫秒） |
-| `fallbackOsascript` | boolean | `true` | 无 Web GUI 客户端时回退到 osascript 通知（归属脚本编辑器） |
+| `fallbackOsascript` | boolean | `false` | 无 Web GUI 客户端时回退到 osascript 通知（归属脚本编辑器，默认关闭） |
 
 完整示例：
 
@@ -91,7 +91,7 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
         sound: true
         language: zh
         cooldownMs: 3000
-        fallbackOsascript: true
+        fallbackOsascript: false
 ```
 
 ## 🧠 工作原理
@@ -121,7 +121,7 @@ macOS 的通知会显示**发送应用的名称与图标**。本插件采用两�
 
 > 安装/更新插件后请**刷新一次 Web GUI 页面**以加载 Client 端模块。
 > 提示音使用系统默认通知音（浏览器通知不支持自定义音效）；可通过 `sound: false` 静音。
-> 没有 Web GUI 客户端连接时（如 headless profile），可选回退到 `osascript`（归属脚本编辑器）；不想要可设 `fallbackOsascript: false`。
+> 没有 Web GUI 客户端连接时（如 headless profile / 页面已关闭），可选回退到 `osascript`（归属脚本编辑器）；默认关闭（`fallbackOsascript: false`），以保持通知归属始终为 DeepSeek Harness。
 
 ### 去重与抑制
 

@@ -22,3 +22,5 @@
         appName: DeepSeek Harness
         # 完成通知的最小间隔（毫秒），避免连续快速通知
         cooldownMs: 3000
+        # 无 Web GUI 客户端连接时是否回退到 osascript（归属脚本编辑器）
+        fallbackOsascript: false

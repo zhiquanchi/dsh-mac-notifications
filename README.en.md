@@ -55,7 +55,7 @@ All options live in the plugin row's `config` in `cordis.patch.yml`:
 | `sound` | boolean | `true` | Play the system default notification sound |
 | `language` | `'zh' \| 'en'` | `'zh'` | Notification copy language |
 | `cooldownMs` | number | `3000` | Minimum interval between completion notifications |
-| `fallbackOsascript` | boolean | `true` | Fall back to osascript (Script Editor attribution) when no Web GUI client is connected |
+| `fallbackOsascript` | boolean | `false` | Fall back to osascript (Script Editor attribution) when no Web GUI client is connected (off by default) |
 
 ## 🧠 How it works
 
@@ -89,7 +89,7 @@ Notification Center shows **the app name "DeepSeek Harness" and its whale icon**
 > Refresh the Web GUI page once after installing/updating, so the Client half loads.
 > Browser notifications play the system default sound; set `sound: false` for silence.
 > With no Web GUI client connected (e.g. a headless profile), an optional
-> `osascript` fallback keeps notifications working; set `fallbackOsascript: false` to disable it.
+> `osascript` fallback keeps notifications working; it is off by default (`fallbackOsascript: false`) so every notification stays attributed to DeepSeek Harness.
 
 ## 🗒️ Limitations
 
