@@ -70,26 +70,29 @@ const TEXT = {
 }
 
 const HELPER_NAME = 'DeepSeek Notifier.app'
-const HELPER_BUILD_VERSION = '2'
+const HELPER_BUILD_VERSION = '3'
 
 const NOTIFY_SCRIPT = `on run argv
-    set notifyBody to item 1 of argv
-    set notifyTitle to item 2 of argv
-    set notifySubtitle to item 3 of argv
-    set notifySound to item 4 of argv
-    if notifySubtitle is "" then
-        if notifySound is "" then
-            display notification notifyBody with title notifyTitle
+    try
+        if (count of argv) is less than 4 then return
+        set notifyBody to item 1 of argv
+        set notifyTitle to item 2 of argv
+        set notifySubtitle to item 3 of argv
+        set notifySound to item 4 of argv
+        if notifySubtitle is "" then
+            if notifySound is "" then
+                display notification notifyBody with title notifyTitle
+            else
+                display notification notifyBody with title notifyTitle sound name notifySound
+            end if
         else
-            display notification notifyBody with title notifyTitle sound name notifySound
+            if notifySound is "" then
+                display notification notifyBody with title notifyTitle subtitle notifySubtitle
+            else
+                display notification notifyBody with title notifyTitle subtitle notifySubtitle sound name notifySound
+            end if
         end if
-    else
-        if notifySound is "" then
-            display notification notifyBody with title notifyTitle subtitle notifySubtitle
-        else
-            display notification notifyBody with title notifyTitle subtitle notifySubtitle sound name notifySound
-        end if
-    end if
+    end try
     return
 end run
 `
@@ -264,8 +267,11 @@ export function apply(ctx, config) {
     const titleText = truncate(title, 80) || 'DeepSeek'
     const subText = subtitle ? truncate(subtitle, 120) : ''
     // Preferred transport: the helper applet shows the DeepSeek logo.
+    // The applet is executed directly so its `on run argv` receives the
+    // arguments reliably (LaunchServices `open --args` does not deliver
+    // them to applets).
     if (helperApp) {
-      spawnDetached('/usr/bin/open', ['-a', helperApp, '--args', bodyText, titleText, subText, sound], () => {
+      spawnDetached(join(helperApp, 'Contents/MacOS/applet'), [bodyText, titleText, subText, sound], () => {
         notifyAttributed({ bodyText, titleText, subText, sound })
       })
       return
