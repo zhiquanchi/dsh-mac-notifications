@@ -1,6 +1,6 @@
 # dsh-mac-notifications
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）增加**原生 macOS 通知**的插件：在智能体需要你做出选择、任务完成、任务异常中断时，通过系统通知中心（Notification Center）弹出提醒——显示 DeepSeek Harness 应用自身图标的原生样式通知。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）增加**原生 macOS 通知**的插件：在智能体需要你做出选择、任务完成、任务异常中断时，通过系统通知中心（Notification Center）弹出提醒——**通知图标显示 DeepSeek 官方鲸鱼 logo**，原生样式。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
@@ -109,11 +109,14 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
 | `agent/error` | 步骤或回合出错（可能没有持久化记录） | 任务异常中断 |
 | `api-session/error` | 智能体在持久回合之外失败 | 任务异常中断 |
 
-### 通知通道
+### 通知通道与图标
 
-通知通过 `osascript display notification` 发送，并归属到 `appName` 指定的应用——
-因此通知中心里显示的是 **DeepSeek Harness 应用自身的图标**（真正的原生样式）。
-若归属失败（例如应用名不一致），自动退化为不带归属的原生通知，仍可正常显示。
+macOS 的通知图标 = 发送通知的应用的图标。为了让通知显示 **DeepSeek 官方鲸鱼 logo**，插件会在系统临时目录自动构建一个轻量辅助应用
+`DeepSeek Notifier.app`（无窗口、无 Dock 图标，图标为 DeepSeek 鲸鱼），并通过它发送通知。
+构建失败时自动回退为归属到 `appName` 应用的 `osascript` 通知。
+
+> ⚠️ 首次使用请在 **系统设置 → 通知** 中找到 **DeepSeek Notifier** 并开启"允许通知"，否则 macOS 会静默丢弃它的通知。
+> 辅助应用使用的 DeepSeek logo 版权归 DeepSeek 所有，仅用于通知图标显示。
 
 ### 去重与抑制
 
@@ -124,8 +127,8 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
 ## 🗒️ 已知限制
 
 - **仅 macOS 生效**（依赖 `/usr/bin/osascript`）；其他平台插件安全空转，不发通知。
-- 点击 `osascript` 通知本身**不会**把应用带到前台（系统限制）；如需"点击跳回对话"可后续扩展。
-- 若系统未授予通知权限，通知会静默丢弃：请在 **系统设置 → 通知** 中为 DeepSeek Harness 开启"允许通知"。
+- 点击 `osascript`/辅助应用的通知本身**不会**把应用带到前台（系统限制）；如需"点击跳回对话"可后续扩展。
+- 通知图标来自 **DeepSeek Notifier** 辅助应用（首次需在 系统设置 → 通知 中授权）。
 - 通知文案基于配置语言 `zh`/`en`，问题内容本身使用模型输出原文。
 
 ## 🔧 开发

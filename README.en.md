@@ -1,6 +1,6 @@
 # dsh-mac-notifications
 
-Native **macOS Notification Center alerts** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): when the agent needs your choice, when a task completes, and when a task fails — as true native notifications bearing the DeepSeek Harness app icon.
+Native **macOS Notification Center alerts** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): when the agent needs your choice, when a task completes, and when a task fails — with the **official DeepSeek whale logo as the notification icon**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
@@ -72,19 +72,24 @@ A dependency-free Host (Node) Cordis plugin using only Node's built-in `child_pr
 | `agent/error` | Step or turn errored (may lack a durable record) | Task failed |
 | `api-session/error` | Agent failed outside a durable turn | Task failed |
 
-### Notification transport
+### Notification transport & icon
 
-Notifications are posted via `osascript display notification` attributed to the app
-named by `appName`, so Notification Center shows **the DeepSeek Harness app's own
-icon** — a genuine native notification. If attribution fails, the plugin falls back
-to an unattributed native notification.
+macOS shows the sender app's icon on every notification. To display the official
+**DeepSeek whale logo**, the plugin builds a lightweight helper applet
+(`DeepSeek Notifier.app`, windowless, no Dock icon, DeepSeek logo as its icon) in
+the system temp directory and posts notifications through it. If the helper
+cannot be built or launched, it falls back to `osascript` notifications
+attributed to `appName`.
+
+> ⚠️ On first use, enable notifications for **DeepSeek Notifier** under
+> **System Settings → Notifications**, otherwise macOS silently drops them.
+> The DeepSeek logo belongs to DeepSeek and is used only as the notification icon.
 
 ## 🗒️ Limitations
 
 - **macOS only** (`/usr/bin/osascript`); on other platforms the plugin is a no-op.
 - Clicking an `osascript` notification does not focus the app (system limitation).
-- Without Notification permission the alert is silently dropped: enable it under
-  **System Settings → Notifications** for DeepSeek Harness.
+- Notification icon comes from the **DeepSeek Notifier** helper app — grant it permission under System Settings → Notifications on first use.
 
 ## 🏪 Market listings
 

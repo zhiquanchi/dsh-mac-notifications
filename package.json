@@ -29,6 +29,8 @@
   "files": [
     "index.js",
     "cordis.patch.yml",
+    "assets/deepseek.icns",
+    "assets/deepseek-whale-1024.png",
     "locale/*.json",
     "icon.svg",
     "README.md",
