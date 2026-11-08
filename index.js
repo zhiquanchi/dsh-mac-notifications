@@ -8,6 +8,12 @@
  * the DeepSeek Harness application itself** (its name and whale icon) — never
  * to Script Editor.
  *
+ * Routes (registered on webServer, prefix /plugin/dsh-mac-notifications):
+ *   GET /events   → text/event-stream (SSE push, heartbeat, hello frame)
+ *   GET /pending?since=<n> → catch-up frames after reconnect (JSON)
+ *   GET /status   → JSON { clients } — how many Web GUI pages are subscribed
+ *   GET /test?kind=done|error|ask → publish a demo frame ("试一下")
+ *
  * Triggers:
  *  - the agent asks you to make a choice (`user-questions/request`)
  *  - an approval decision is requested (`approval/request`)
@@ -21,6 +27,11 @@
  * Script Editor and can be disabled with `fallbackOsascript: false`.
  */
 import { spawn } from 'node:child_process'
+
+const ROUTE_PREFIX = '/plugin/dsh-mac-notifications'
+const BUFFER_LIMIT = 100
+const HEARTBEAT_MS = 15_000
+const MAX_BODY_BYTES = 16 * 1024
 
 const DEFAULT_CONFIG = {
   questions: true,
@@ -121,44 +132,128 @@ export function apply(ctx, config) {
 
   // --- SSE channel: notification payloads for the Web GUI client half. ---
   const clients = new Set()
-  const encoder = new TextEncoder()
+  const frames = []
+  let seq = 0
+
+  function publish(payload, force = false) {
+    const full = { ...payload, seq: ++seq, at: Date.now() }
+    frames.push(full)
+    if (frames.length > BUFFER_LIMIT) frames.shift()
+    const chunk = `data: ${JSON.stringify(full)}\n\n`
+    for (const res of clients) {
+      try {
+        res.write(chunk)
+      } catch {
+        /* broken stream; the close handler removes it */
+      }
+    }
+    if (!force && clients.size === 0 && cfg.fallbackOsascript) notifyViaOsascript(payload)
+    return full
+  }
+
+  function sendJson(res, status, body) {
+    const text = JSON.stringify(body)
+    res.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(text),
+      'cache-control': 'no-store',
+    })
+    res.end(text)
+  }
+
+  function openStream(req, res) {
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    })
+    if (typeof res.flushHeaders === 'function') res.flushHeaders()
+    res.write('retry: 3000\n\n')
+    res.write(`data: ${JSON.stringify({ kind: 'hello', seq, at: Date.now(), fallbackOsascript: cfg.fallbackOsascript })}\n\n`)
+
+    clients.add(res)
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n')
+      } catch {
+        /* handled by close */
+      }
+    }, HEARTBEAT_MS)
+    heartbeat.unref?.()
+
+    const cleanup = () => {
+      clearInterval(heartbeat)
+      clients.delete(res)
+    }
+    res.on('close', cleanup)
+    res.on('error', cleanup)
+  }
+
+  async function handler(req, res) {
+    let url
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost')
+    } catch {
+      return sendJson(res, 400, { error: 'bad url' })
+    }
+    const path = url.pathname
+    const method = req.method ?? 'GET'
+    if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' })
+
+    if (path === `${ROUTE_PREFIX}/events`) {
+      if (method === 'HEAD') {
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
+        return res.end()
+      }
+      return openStream(req, res)
+    }
+    if (path === `${ROUTE_PREFIX}/pending`) {
+      const since = Number(url.searchParams.get('since') ?? 0) || 0
+      return sendJson(res, 200, { cursor: seq, items: frames.filter((f) => f.seq > since) })
+    }
+    if (path === `${ROUTE_PREFIX}/status`) {
+      return sendJson(res, 200, { clients: clients.size, seq, fallbackOsascript: cfg.fallbackOsascript })
+    }
+    if (path === `${ROUTE_PREFIX}/test`) {
+      const kind = url.searchParams.get('kind')
+      let payload
+      if (kind === 'error') {
+        payload = { kind: 'error', title: t.errorTitle, body: t.errorBody('演示：这是一条测试通知') }
+      } else if (kind === 'ask') {
+        payload = { kind: 'ask', title: t.askTitle, subtitle: t.askSubtitle, body: '演示：这是一条测试通知' }
+      } else {
+        payload = { kind: 'done', title: t.doneTitle, body: t.doneBody() }
+      }
+      publish(payload, true)
+      return sendJson(res, 200, { ok: true })
+    }
+    return sendJson(res, 404, { error: 'not found' })
+  }
+
+  function notifyViaOsascript(payload) {
+    const sound = cfg.sound ? ' sound name "Glass"' : ''
+    const script = `display notification "${applescriptEscape(payload.body)}" with title "${applescriptEscape(payload.title)}"${sound}`
+    spawnDetached('/usr/bin/osascript', ['-e', script], (error) => {
+      log.warn(`mac-notifications: osascript fallback failed: ${String(error?.message ?? error)}`)
+    })
+  }
+
   const webServer = ctx.get('webServer')
   if (webServer) {
+    ctx.effect(() => webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler }), 'mac-notifications http route')
     ctx.effect(
-      () =>
-        webServer.register({
-          kind: 'exact',
-          path: '/plugin/dsh-mac-notifications/events',
-          resource: async () => {
-            let client = null
-            const stream = new ReadableStream({
-              start(controller) {
-                client = {
-                  send(payload) {
-                    try {
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`))
-                    } catch {
-                      /* stream already closed */
-                    }
-                  },
-                }
-                clients.add(client)
-                controller.enqueue(encoder.encode('retry: 3000\n\n'))
-              },
-              cancel() {
-                if (client) clients.delete(client)
-              },
-            })
-            return new Response(stream, {
-              headers: {
-                'content-type': 'text/event-stream; charset=utf-8',
-                'cache-control': 'no-cache, no-transform',
-                connection: 'keep-alive',
-              },
-            })
-          },
-        }),
-      'mac-notifications sse',
+      () => () => {
+        for (const res of clients) {
+          try {
+            res.end()
+          } catch {
+            /* already gone */
+          }
+        }
+        clients.clear()
+      },
+      'mac-notifications close streams',
     )
   }
 
@@ -198,26 +293,15 @@ export function apply(ctx, config) {
     }
   }
 
-  function notify({ title, subtitle, body }) {
-    const payload = {
+  function notify({ title, subtitle, body, sessionId }) {
+    publish({
+      kind: 'notify',
       title: truncate(title, 80) || 'DeepSeek',
       subtitle: subtitle ? truncate(subtitle, 120) : '',
       body: truncate(body, 200) || ' ',
       silent: !cfg.sound,
       tag: 'dsh-mac-notifications',
-    }
-    if (clients.size > 0) {
-      for (const client of clients) client.send(payload)
-      return
-    }
-    if (cfg.fallbackOsascript) notifyViaOsascript(payload)
-  }
-
-  function notifyViaOsascript(payload) {
-    const sound = cfg.sound ? ' sound name "Glass"' : ''
-    const script = `display notification "${applescriptEscape(payload.body)}" with title "${applescriptEscape(payload.title)}"${sound}`
-    spawnDetached('/usr/bin/osascript', ['-e', script], (error) => {
-      log.warn(`mac-notifications: osascript fallback failed: ${String(error?.message ?? error)}`)
+      ...(sessionId ? { sessionId } : {}),
     })
   }
 
@@ -248,6 +332,7 @@ export function apply(ctx, config) {
           title: t.askTitle,
           subtitle: t.askSubtitle,
           body: truncate(first?.question) || truncate(first?.header) || t.askSubtitle,
+          sessionId: request?.agent?.id,
         })
       }
       return next()
@@ -261,7 +346,11 @@ export function apply(ctx, config) {
     (req, next) => {
       if (cfg.approvals) {
         const reason = truncate(req?.displayReason?.[cfg.language] ?? req?.displayReason?.en ?? req?.reason, 140)
-        notify({ title: t.approvalTitle, body: t.approvalBody(truncate(req?.toolName, 60), reason) })
+        notify({
+          title: t.approvalTitle,
+          body: t.approvalBody(truncate(req?.toolName, 60), reason),
+          sessionId: req?.agent?.id,
+        })
       }
       return next()
     },
@@ -280,13 +369,13 @@ export function apply(ctx, config) {
         const prev = lastDoneNotify.get(session.id) ?? 0
         if (time - prev < cfg.cooldownMs) return
         lastDoneNotify.set(session.id, time)
-        notify({ title: t.doneTitle, body: t.doneBody(sessionTitle(session)) })
+        notify({ title: t.doneTitle, body: t.doneBody(sessionTitle(session)), sessionId: session.id })
         break
       }
       case 'error': {
         if (!cfg.errors) return
         if (dedupeError(session.id, turn)) return
-        notify({ title: t.errorTitle, body: t.errorBody(errorText(reason.error)) })
+        notify({ title: t.errorTitle, body: t.errorBody(errorText(reason.error)), sessionId: session.id })
         break
       }
       case 'aborted': {
@@ -294,7 +383,7 @@ export function apply(ctx, config) {
         const cause = reason.reason?.kind
         if (cause === 'user') return
         if (dedupeError(session.id, turn)) return
-        notify({ title: t.abortedTitle, body: t.abortedBody(cause) })
+        notify({ title: t.abortedTitle, body: t.abortedBody(cause), sessionId: session.id })
         break
       }
       default:
@@ -308,13 +397,13 @@ export function apply(ctx, config) {
     const { agent, turn, error } = payload ?? {}
     if (!cfg.includeSubagents && isSubagentById(agent?.id)) return
     if (agent?.id && dedupeError(agent.id, turn)) return
-    notify({ title: t.errorTitle, body: t.errorBody(errorText(error)) })
+    notify({ title: t.errorTitle, body: t.errorBody(errorText(error)), sessionId: agent?.id })
   })
 
   // 5) An agent failed outside a durable turn position.
   ctx.on('api-session/error', (sessionId, message) => {
     if (!cfg.errors) return
     if (!cfg.includeSubagents && isSubagentById(sessionId)) return
-    notify({ title: t.errorTitle, body: t.errorBody(truncate(message)) })
+    notify({ title: t.errorTitle, body: t.errorBody(truncate(message)), sessionId })
   })
 }
