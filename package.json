@@ -15,6 +15,11 @@
     "osascript"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhiquanchi/dsh-mac-notifications.git"
+  },
+  "homepage": "https://github.com/zhiquanchi/dsh-mac-notifications#readme",
   "type": "module",
   "exports": {
     ".": "./index.js",
