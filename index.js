@@ -1,29 +1,26 @@
 /**
- * dsh-mac-notifications — native macOS Notification Center notifications
- * for the DeepSeek Harness desktop app, bearing the official DeepSeek whale
- * logo as the notification icon.
+ * dsh-mac-notifications — native macOS Notification Center notifications for
+ * the DeepSeek Harness desktop app.
  *
- * Fires a native notification when:
+ * The Host half listens to Harness events and pushes notification payloads to
+ * the Web GUI over an SSE endpoint. The Client half (client.js) shows them
+ * through the browser Notification API, so macOS delivers them **attributed to
+ * the DeepSeek Harness application itself** (its name and whale icon) — never
+ * to Script Editor.
+ *
+ * Triggers:
  *  - the agent asks you to make a choice (`user-questions/request`)
  *  - an approval decision is requested (`approval/request`)
- *  - a turn completes (`turn/end` with reason `completed`, unless live
- *    background jobs still run for that session)
+ *  - a turn completes (`turn/end` completed, unless live background jobs
+ *    still run for that session)
  *  - a task fails abnormally (`turn/end` error/aborted, `agent/error`,
  *    `api-session/error`), deduplicated per turn
  *
- * Transport: macOS shows the sender app's icon in Notification Center, so the
- * plugin builds a small helper applet ("DeepSeek Notifier", LSUIElement,
- * DeepSeek logo as its icon) in the system temp directory and posts
- * notifications through it. If the helper cannot be built or launched, it
- * falls back to `osascript display notification` attributed to `appName`.
+ * When no Web GUI client is connected (e.g. a headless profile), an
+ * `osascript` fallback keeps notifications working; it is attributed to
+ * Script Editor and can be disabled with `fallbackOsascript: false`.
  */
-import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const MODULE_DIR = dirname(fileURLToPath(import.meta.url))
+import { spawn } from 'node:child_process'
 
 const DEFAULT_CONFIG = {
   questions: true,
@@ -34,8 +31,8 @@ const DEFAULT_CONFIG = {
   suppressWhenJobsRunning: true,
   sound: true,
   language: 'zh',
-  appName: 'DeepSeek Harness',
   cooldownMs: 3000,
+  fallbackOsascript: true,
 }
 
 const TEXT = {
@@ -69,34 +66,6 @@ const TEXT = {
   },
 }
 
-const HELPER_NAME = 'DeepSeek Notifier.app'
-const HELPER_BUILD_VERSION = '3'
-
-const NOTIFY_SCRIPT = `on run argv
-    try
-        if (count of argv) is less than 4 then return
-        set notifyBody to item 1 of argv
-        set notifyTitle to item 2 of argv
-        set notifySubtitle to item 3 of argv
-        set notifySound to item 4 of argv
-        if notifySubtitle is "" then
-            if notifySound is "" then
-                display notification notifyBody with title notifyTitle
-            else
-                display notification notifyBody with title notifyTitle sound name notifySound
-            end if
-        else
-            if notifySound is "" then
-                display notification notifyBody with title notifyTitle subtitle notifySubtitle
-            else
-                display notification notifyBody with title notifyTitle subtitle notifySubtitle sound name notifySound
-            end if
-        end if
-    end try
-    return
-end run
-`
-
 function truncate(text, max = 200) {
   if (typeof text !== 'string') return ''
   const clean = text.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -106,75 +75,6 @@ function truncate(text, max = 200) {
 
 function applescriptEscape(text) {
   return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-}
-
-function helperDir() {
-  return join(tmpdir(), 'dsh-mac-notifications-helper')
-}
-
-/**
- * Build (once per boot) a minimal applet that posts notifications under its
- * own bundle identity, showing the DeepSeek logo as the notification icon.
- */
-function buildHelper(log) {
-  const dir = helperDir()
-  const appPath = join(dir, HELPER_NAME)
-  const stampPath = join(dir, `.built-v${HELPER_BUILD_VERSION}`)
-  if (existsSync(stampPath) && existsSync(join(appPath, 'Contents/MacOS/applet'))) {
-    return Promise.resolve(appPath)
-  }
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (path) => {
-      if (settled) return
-      settled = true
-      resolve(path)
-    }
-    try {
-      mkdirSync(dir, { recursive: true })
-      rmSync(appPath, { recursive: true, force: true })
-      const scriptPath = join(dir, 'notify.applescript')
-      writeFileSync(scriptPath, NOTIFY_SCRIPT, 'utf8')
-      const compile = spawn('/usr/bin/osacompile', ['-o', appPath, scriptPath], { stdio: 'ignore' })
-      const timer = setTimeout(() => {
-        try {
-          compile.kill('SIGKILL')
-        } catch {
-          /* already gone */
-        }
-        finish(null)
-      }, 30000)
-      compile.on('error', () => {
-        clearTimeout(timer)
-        finish(null)
-      })
-      compile.on('close', (code) => {
-        clearTimeout(timer)
-        if (code !== 0 || !existsSync(join(appPath, 'Contents/MacOS/applet'))) return finish(null)
-        try {
-          const icns = join(MODULE_DIR, 'assets', 'deepseek.icns')
-          if (existsSync(icns)) copyFileSync(icns, join(appPath, 'Contents/Resources/applet.icns'))
-          const plist = join(appPath, 'Contents/Info.plist')
-          for (const [key, type, value] of [
-            ['CFBundleIdentifier', 'string', 'com.dsh.macnotifications.helper'],
-            ['CFBundleName', 'string', 'DeepSeek Notifier'],
-            ['LSUIElement', 'bool', 'true'],
-          ]) {
-            spawnSync('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, plist])
-            spawnSync('/usr/libexec/PlistBuddy', ['-c', `Add :${key} ${type} ${value}`, plist])
-          }
-          writeFileSync(stampPath, String(Date.now()))
-          return finish(appPath)
-        } catch (error) {
-          log.warn(`mac-notifications: helper finalize failed: ${String(error?.message ?? error)}`)
-          return finish(null)
-        }
-      })
-    } catch (error) {
-      log.warn(`mac-notifications: helper build failed: ${String(error?.message ?? error)}`)
-      finish(null)
-    }
-  })
 }
 
 /** Fire-and-forget spawn with a 5 s kill guard; onFail runs once. */
@@ -219,11 +119,48 @@ export function apply(ctx, config) {
   const t = TEXT[cfg.language === 'en' ? 'en' : 'zh']
   const log = ctx.logger ?? console
 
-  let helperApp = null
-  buildHelper(log).then((path) => {
-    helperApp = path
-    if (path) log.info('mac-notifications: DeepSeek notification helper ready')
-  })
+  // --- SSE channel: notification payloads for the Web GUI client half. ---
+  const clients = new Set()
+  const encoder = new TextEncoder()
+  const webServer = ctx.get('webServer')
+  if (webServer) {
+    ctx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: '/plugin/dsh-mac-notifications/events',
+          resource: async () => {
+            let client = null
+            const stream = new ReadableStream({
+              start(controller) {
+                client = {
+                  send(payload) {
+                    try {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`))
+                    } catch {
+                      /* stream already closed */
+                    }
+                  },
+                }
+                clients.add(client)
+                controller.enqueue(encoder.encode('retry: 3000\n\n'))
+              },
+              cancel() {
+                if (client) clients.delete(client)
+              },
+            })
+            return new Response(stream, {
+              headers: {
+                'content-type': 'text/event-stream; charset=utf-8',
+                'cache-control': 'no-cache, no-transform',
+                connection: 'keep-alive',
+              },
+            })
+          },
+        }),
+      'mac-notifications sse',
+    )
+  }
 
   const lastErrorNotify = new Map() // sessionId -> { turn, time }
   const lastDoneNotify = new Map() // sessionId -> time
@@ -262,35 +199,25 @@ export function apply(ctx, config) {
   }
 
   function notify({ title, subtitle, body }) {
-    const sound = cfg.sound ? 'Glass' : ''
-    const bodyText = truncate(body, 200) || ' '
-    const titleText = truncate(title, 80) || 'DeepSeek'
-    const subText = subtitle ? truncate(subtitle, 120) : ''
-    // Preferred transport: the helper applet shows the DeepSeek logo.
-    // The applet is executed directly so its `on run argv` receives the
-    // arguments reliably (LaunchServices `open --args` does not deliver
-    // them to applets).
-    if (helperApp) {
-      spawnDetached(join(helperApp, 'Contents/MacOS/applet'), [bodyText, titleText, subText, sound], () => {
-        notifyAttributed({ bodyText, titleText, subText, sound })
-      })
+    const payload = {
+      title: truncate(title, 80) || 'DeepSeek',
+      subtitle: subtitle ? truncate(subtitle, 120) : '',
+      body: truncate(body, 200) || ' ',
+      silent: !cfg.sound,
+      tag: 'dsh-mac-notifications',
+    }
+    if (clients.size > 0) {
+      for (const client of clients) client.send(payload)
       return
     }
-    notifyAttributed({ bodyText, titleText, subText, sound })
+    if (cfg.fallbackOsascript) notifyViaOsascript(payload)
   }
 
-  function notifyAttributed({ bodyText, titleText, subText, sound }) {
-    const soundPart = sound ? ' sound name "Glass"' : ''
-    const sub = subText ? ` subtitle "${applescriptEscape(subText)}"` : ''
-    const bodyLiteral = applescriptEscape(bodyText) || ' '
-    const titleLiteral = applescriptEscape(titleText)
-    const app = applescriptEscape(cfg.appName || 'DeepSeek Harness')
-    const attributed = `tell application "${app}" to display notification "${bodyLiteral}" with title "${titleLiteral}"${sub}${soundPart}`
-    spawnDetached('/usr/bin/osascript', ['-e', attributed], () => {
-      const plain = `display notification "${bodyLiteral}" with title "${titleLiteral}"${sub}${soundPart}`
-      spawnDetached('/usr/bin/osascript', ['-e', plain], (error) => {
-        log.warn(`mac-notifications: unable to post notification: ${String(error?.message ?? error)}`)
-      })
+  function notifyViaOsascript(payload) {
+    const sound = cfg.sound ? ' sound name "Glass"' : ''
+    const script = `display notification "${applescriptEscape(payload.body)}" with title "${applescriptEscape(payload.title)}"${sound}`
+    spawnDetached('/usr/bin/osascript', ['-e', script], (error) => {
+      log.warn(`mac-notifications: osascript fallback failed: ${String(error?.message ?? error)}`)
     })
   }
 

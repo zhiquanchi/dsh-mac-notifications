@@ -1,6 +1,6 @@
 # dsh-mac-notifications
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）增加**原生 macOS 通知**的插件：在智能体需要你做出选择、任务完成、任务异常中断时，通过系统通知中心（Notification Center）弹出提醒——**通知图标显示 DeepSeek 官方鲸鱼 logo**，原生样式。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）增加**原生 macOS 通知**的插件：在智能体需要你做出选择、任务完成、任务异常中断时，通过系统通知中心（Notification Center）弹出提醒——**通知以 DeepSeek Harness 应用自身名义发出（应用名称 + 鲸鱼图标）**，而不是脚本编辑器。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
@@ -70,10 +70,10 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
 | `errors` | boolean | `true` | 任务异常中断/失败时通知 |
 | `includeSubagents` | boolean | `false` | 是否包含子智能体（subagent）会话 |
 | `suppressWhenJobsRunning` | boolean | `true` | 会话仍有后台任务运行时抑制完成通知 |
-| `sound` | boolean | `true` | 通知是否播放系统提示音（Glass） |
+| `sound` | boolean | `true` | 通知是否播放系统默认提示音 |
 | `language` | `'zh' \| 'en'` | `'zh'` | 通知文案语言 |
-| `appName` | string | `DeepSeek Harness` | 通知归属应用名（决定通知中心显示的图标） |
 | `cooldownMs` | number | `3000` | 完成通知的最小间隔（毫秒） |
+| `fallbackOsascript` | boolean | `true` | 无 Web GUI 客户端时回退到 osascript 通知（归属脚本编辑器） |
 
 完整示例：
 
@@ -90,13 +90,14 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
         suppressWhenJobsRunning: true
         sound: true
         language: zh
-        appName: DeepSeek Harness
         cooldownMs: 3000
+        fallbackOsascript: true
 ```
 
 ## 🧠 工作原理
 
-插件是纯 Host 端（Node）Cordis 插件，无需构建、无运行时依赖，仅使用 Node 内置的 `child_process`。
+插件由两部分组成：Host 端（Node，纯 `child_process` + 内置流，无构建、无运行时依赖）
+与 Client 端（随 Web GUI 加载的浏览器模块，约 1 KB）。
 
 ### 事件 → 通知
 
@@ -111,12 +112,16 @@ DSH 桌面端「插件 → 发现」页可直接搜索安装（部分市场收�
 
 ### 通知通道与图标
 
-macOS 的通知图标 = 发送通知的应用的图标。为了让通知显示 **DeepSeek 官方鲸鱼 logo**，插件会在系统临时目录自动构建一个轻量辅助应用
-`DeepSeek Notifier.app`（无窗口、无 Dock 图标，图标为 DeepSeek 鲸鱼），并通过它发送通知。
-构建失败时自动回退为归属到 `appName` 应用的 `osascript` 通知。
+macOS 的通知会显示**发送应用的名称与图标**。本插件采用两段式设计：
 
-> ⚠️ 首次使用请在 **系统设置 → 通知** 中找到 **DeepSeek Notifier** 并开启"允许通知"，否则 macOS 会静默丢弃它的通知。
-> 辅助应用使用的 DeepSeek logo 版权归 DeepSeek 所有，仅用于通知图标显示。
+1. **Host 端**监听 Harness 事件，把通知内容通过本机 SSE 端点（`/plugin/dsh-mac-notifications/events`）推送给 Web GUI；
+2. **Client 端**（随 Web GUI 加载）用浏览器 Notification API 弹出通知。
+
+由于通知由 DeepSeek Harness 应用自身的渲染进程发出，通知中心里显示的是**应用名称「DeepSeek Harness」和它的鲸鱼图标**——真正"作为 DeepSeek 的通知"，与脚本编辑器无关。
+
+> 安装/更新插件后请**刷新一次 Web GUI 页面**以加载 Client 端模块。
+> 提示音使用系统默认通知音（浏览器通知不支持自定义音效）；可通过 `sound: false` 静音。
+> 没有 Web GUI 客户端连接时（如 headless profile），可选回退到 `osascript`（归属脚本编辑器）；不想要可设 `fallbackOsascript: false`。
 
 ### 去重与抑制
 
@@ -127,14 +132,14 @@ macOS 的通知图标 = 发送通知的应用的图标。为了让通知显示 *
 ## 🗒️ 已知限制
 
 - **仅 macOS 生效**（依赖 `/usr/bin/osascript`）；其他平台插件安全空转，不发通知。
-- 点击 `osascript`/辅助应用的通知本身**不会**把应用带到前台（系统限制）；如需"点击跳回对话"可后续扩展。
-- 通知图标来自 **DeepSeek Notifier** 辅助应用（首次需在 系统设置 → 通知 中授权）。
+- 点击通知本身**不会**把应用带到前台（系统限制）；如需"点击跳回对话"可后续扩展。
+- 安装/更新后需刷新一次 Web GUI 页面；通知权限沿用 DeepSeek Harness 应用自身的系统通知授权。
 - 通知文案基于配置语言 `zh`/`en`，问题内容本身使用模型输出原文。
 
 ## 🔧 开发
 
 ```sh
-# 无构建步骤：index.js 即为全部运行时代码
+# 无构建步骤：index.js / client.js 即为全部运行时代码
 git clone https://github.com/zhiquanchi/dsh-mac-notifications
 cd dsh-mac-notifications
 node --input-type=module --eval "$(cat index.js)"   # 语法自检
@@ -148,9 +153,10 @@ dsh plugin --profile web add ./dsh-mac-notifications
 
 ```
 dsh-mac-notifications/
-├── index.js            # 插件运行时（Host 端，纯 Node）
+├── index.js            # 插件运行时（Host 端：事件监听 + SSE 推送）
+├── client.js           # 插件运行时（Client 端：浏览器 Notification API）
 ├── cordis.patch.yml    # Cordis 组合补丁（插件行 + 默认配置）
-├── package.json        # dsh.bundle 清单 + npm 元数据
+├── package.json        # dsh.bundle + dsh.client 清单 + npm 元数据
 ├── icon.svg            # 插件图标（原始创作）
 ├── locale/             # en / zh 显示元数据
 ├── README.md / README.en.md

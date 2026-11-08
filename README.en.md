@@ -1,6 +1,6 @@
 # dsh-mac-notifications
 
-Native **macOS Notification Center alerts** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): when the agent needs your choice, when a task completes, and when a task fails — with the **official DeepSeek whale logo as the notification icon**.
+Native **macOS Notification Center alerts** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): when the agent needs your choice, when a task completes, and when a task fails — **delivered under the DeepSeek Harness application's own name and whale icon**, never as Script Editor.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
@@ -52,10 +52,10 @@ All options live in the plugin row's `config` in `cordis.patch.yml`:
 | `errors` | boolean | `true` | Notify on abnormal interruption/failure |
 | `includeSubagents` | boolean | `false` | Include subagent sessions |
 | `suppressWhenJobsRunning` | boolean | `true` | Suppress completion while background jobs run |
-| `sound` | boolean | `true` | Play the system "Glass" sound |
+| `sound` | boolean | `true` | Play the system default notification sound |
 | `language` | `'zh' \| 'en'` | `'zh'` | Notification copy language |
-| `appName` | string | `DeepSeek Harness` | App the notification is attributed to (decides the icon) |
 | `cooldownMs` | number | `3000` | Minimum interval between completion notifications |
+| `fallbackOsascript` | boolean | `true` | Fall back to osascript (Script Editor attribution) when no Web GUI client is connected |
 
 ## 🧠 How it works
 
@@ -74,22 +74,28 @@ A dependency-free Host (Node) Cordis plugin using only Node's built-in `child_pr
 
 ### Notification transport & icon
 
-macOS shows the sender app's icon on every notification. To display the official
-**DeepSeek whale logo**, the plugin builds a lightweight helper applet
-(`DeepSeek Notifier.app`, windowless, no Dock icon, DeepSeek logo as its icon) in
-the system temp directory and posts notifications through it. If the helper
-cannot be built or launched, it falls back to `osascript` notifications
-attributed to `appName`.
+macOS shows the sending app's name and icon on every notification. This plugin
+uses a two-part design:
 
-> ⚠️ On first use, enable notifications for **DeepSeek Notifier** under
-> **System Settings → Notifications**, otherwise macOS silently drops them.
-> The DeepSeek logo belongs to DeepSeek and is used only as the notification icon.
+1. The **Host half** listens to Harness events and pushes notification payloads
+   to the Web GUI over a local SSE endpoint (`/plugin/dsh-mac-notifications/events`);
+2. The **Client half** (loaded with the Web GUI) shows them through the browser
+   Notification API.
+
+Because the notification is posted by the DeepSeek Harness app's own renderer,
+Notification Center shows **the app name "DeepSeek Harness" and its whale icon**
+— a genuine DeepSeek notification, with nothing to do with Script Editor.
+
+> Refresh the Web GUI page once after installing/updating, so the Client half loads.
+> Browser notifications play the system default sound; set `sound: false` for silence.
+> With no Web GUI client connected (e.g. a headless profile), an optional
+> `osascript` fallback keeps notifications working; set `fallbackOsascript: false` to disable it.
 
 ## 🗒️ Limitations
 
 - **macOS only** (`/usr/bin/osascript`); on other platforms the plugin is a no-op.
 - Clicking an `osascript` notification does not focus the app (system limitation).
-- Notification icon comes from the **DeepSeek Notifier** helper app — grant it permission under System Settings → Notifications on first use.
+- Refresh the Web GUI once after install/update; notification permission is the DeepSeek Harness app's own system authorization.
 
 ## 🏪 Market listings
 
