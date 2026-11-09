@@ -134,6 +134,31 @@ export function apply(ctx, config) {
   const clients = new Set()
   const frames = []
   let seq = 0
+  let lastReport = null
+
+  function readBody(req) {
+    return new Promise((resolve) => {
+      let size = 0
+      const chunks = []
+      req.on('data', (chunk) => {
+        size += chunk.length
+        if (size > MAX_BODY_BYTES) {
+          resolve(null)
+          return
+        }
+        chunks.push(chunk)
+      })
+      req.on('end', () => {
+        if (size === 0) return resolve({})
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+        } catch {
+          resolve(null)
+        }
+      })
+      req.on('error', () => resolve(null))
+    })
+  }
 
   function publish(payload, force = false) {
     const full = { ...payload, seq: ++seq, at: Date.now() }
@@ -199,6 +224,17 @@ export function apply(ctx, config) {
     }
     const path = url.pathname
     const method = req.method ?? 'GET'
+
+    if (path === `${ROUTE_PREFIX}/report`) {
+      if (method === 'POST') {
+        const body = await readBody(req)
+        if (body === null) return sendJson(res, 400, { error: 'body must be a JSON object' })
+        lastReport = { receivedAt: Date.now(), ...body }
+        return sendJson(res, 200, { ok: true })
+      }
+      return sendJson(res, 200, { lastReport: lastReport ?? null })
+    }
+
     if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' })
 
     if (path === `${ROUTE_PREFIX}/events`) {
@@ -219,11 +255,11 @@ export function apply(ctx, config) {
       const kind = url.searchParams.get('kind')
       let payload
       if (kind === 'error') {
-        payload = { kind: 'error', title: t.errorTitle, body: t.errorBody('演示：这是一条测试通知') }
+        payload = { kind: 'notify', title: t.errorTitle, body: t.errorBody('演示：这是一条测试通知') }
       } else if (kind === 'ask') {
-        payload = { kind: 'ask', title: t.askTitle, subtitle: t.askSubtitle, body: '演示：这是一条测试通知' }
+        payload = { kind: 'notify', title: t.askTitle, subtitle: t.askSubtitle, body: '演示：这是一条测试通知' }
       } else {
-        payload = { kind: 'done', title: t.doneTitle, body: t.doneBody() }
+        payload = { kind: 'notify', title: t.doneTitle, body: t.doneBody() }
       }
       publish(payload, true)
       return sendJson(res, 200, { ok: true })

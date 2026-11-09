@@ -27,6 +27,8 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- 系统通知
 
+    var activeNotifications = new Set()
+
     function osTitle(frame) {
       return frame.title || 'DeepSeek'
     }
@@ -38,28 +40,57 @@ window.__ModuleLoader__.load({
       return lines.join('\n').slice(0, 240)
     }
 
-    function focusAndOpen(sessionId) {
+    /** 把点击链路的每一步结果报给宿主 /report，便于定位问题。 */
+    function report(diag) {
       try {
-        window.focus()
+        fetch('/plugin/dsh-mac-notifications/report', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ at: Date.now(), ua: navigator.userAgent.slice(0, 120), ...diag }),
+        }).catch(function () {
+          /* 宿主没起来时静默 */
+        })
       } catch {
         /* ignore */
       }
+    }
+
+    function focusAndOpen(sessionId) {
+      var diag = {
+        clicked: true,
+        hasSessionId: Boolean(sessionId),
+        sessionId: typeof sessionId === 'string' ? sessionId.slice(0, 40) : String(sessionId),
+        hadFocusBefore: document.hasFocus(),
+        visibleBefore: document.visibilityState,
+        hasUiWorkspace: false,
+        opened: false,
+        error: null,
+        focusError: null,
+      }
+      // 1) 切换到通知对应的会话（先切换再唤起窗口）
       if (sessionId) {
-        var workspace = null
         try {
-          workspace = ctxRef && typeof ctxRef.get === 'function' ? ctxRef.get('uiWorkspace') : null
-        } catch {
-          workspace = null
-        }
-        if (workspace && typeof workspace.openSession === 'function') {
-          try {
+          var workspace = ctxRef && typeof ctxRef.get === 'function' ? ctxRef.get('uiWorkspace') : null
+          diag.hasUiWorkspace = Boolean(workspace && typeof workspace.openSession === 'function')
+          if (workspace && typeof workspace.openSession === 'function') {
             workspace.openSession(sessionId)
-          } catch {
-            /* ignore */
+            diag.opened = true
+          } else if (workspace === null || workspace === undefined) {
+            diag.error = 'uiWorkspace 服务不可用'
+          } else {
+            diag.error = 'uiWorkspace.openSession 不可用'
           }
+        } catch (error) {
+          diag.error = 'openSession: ' + (error && error.message ? error.message : String(error))
         }
       }
-      // Raise the desktop window through the protocol the desktop app registers.
+      // 2) 把窗口带到前台（Electron 里由通知点击触发的用户手势允许 focus）
+      try {
+        window.focus()
+      } catch (error) {
+        diag.focusError = String(error && error.message ? error.message : error)
+      }
+      // 3) 第三方桌面壳（DSH Desktop 等）注册的唤起协议；官方桌面端无此协议，无副作用
       try {
         if (/electron/i.test(navigator.userAgent || '')) {
           var frame = document.createElement('iframe')
@@ -73,6 +104,7 @@ window.__ModuleLoader__.load({
       } catch {
         /* ignore */
       }
+      report(diag)
     }
 
     function osNotify(frame) {
@@ -84,6 +116,11 @@ window.__ModuleLoader__.load({
           tag: frame.tag || 'dsh-mac-notifications',
           silent: frame.silent === true,
         })
+        // 保持引用：浏览器会回收无引用的 Notification 对象并关闭通知
+        activeNotifications.add(notification)
+        notification.onclose = function () {
+          activeNotifications.delete(notification)
+        }
         notification.onclick = function () {
           try {
             notification.close()
